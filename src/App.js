@@ -6,10 +6,12 @@ import { XREstimatedLight } from 'three/examples/jsm/webxr/XREstimatedLight';
 
 const ARFurnitureApp = () => {
   const rendererRef = useRef(null);
-  const sceneRef = useRef(null); // Use refs for scene
+  const sceneRef = useRef(null);
   const controllerRef = useRef(null);
   const [furnitureModel, setFurnitureModel] = useState(null);
   const [selectedModel, setSelectedModel] = useState(null);
+  const [initialTouchPosition, setInitialTouchPosition] = useState(null); // Track initial touch position
+  const [isRotating, setIsRotating] = useState(false); // Track if the model is rotating
 
   const initializeScene = useCallback(() => {
     const scene = new THREE.Scene();
@@ -31,7 +33,7 @@ const ARFurnitureApp = () => {
     const loader = new GLTFLoader();
     loader.load('/models/armchair.glb', (gltf) => {
       const model = gltf.scene;
-      model.scale.set(0.1, 0.1, 0.1);
+      model.scale.set(0.1, 0.1, 0.1); // Scale the model
       setFurnitureModel(model);
     });
 
@@ -48,14 +50,35 @@ const ARFurnitureApp = () => {
     });
 
     renderer.setAnimationLoop(() => {
-      if (selectedModel && controllerRef.current.userData.dragging) {
-        const controllerPosition = new THREE.Vector3();
-        controllerRef.current.getWorldPosition(controllerPosition);
-        selectedModel.position.copy(controllerPosition);
-      }
       renderer.render(scene, camera);
     });
-  }, [selectedModel]);
+  }, []);
+
+  // Define the touch handlers using useCallback to prevent redefining them on every render
+  const onTouchStart = useCallback((event) => {
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      setInitialTouchPosition(touch.clientX); // Store the initial x-position of the touch
+      setIsRotating(true); // Start rotating
+    }
+  }, []);
+
+  const onTouchMove = useCallback((event) => {
+    if (isRotating && event.touches.length === 1 && initialTouchPosition !== null) {
+      const touch = event.touches[0];
+      const touchMoveDelta = touch.clientX - initialTouchPosition; // Calculate the difference in x position
+      if (selectedModel) {
+        selectedModel.rotation.y += touchMoveDelta * 0.01; // Apply rotation to the model
+      }
+      setInitialTouchPosition(touch.clientX); // Update initial position for next move
+    }
+  }, [isRotating, initialTouchPosition, selectedModel]);
+
+  const onTouchEnd = useCallback((event) => {
+    if (event.touches.length < 1) {
+      setIsRotating(false); // Stop rotating when the finger is lifted
+    }
+  }, []);
 
   const onControllerEvents = useCallback(() => {
     const controller = controllerRef.current;
@@ -76,24 +99,22 @@ const ARFurnitureApp = () => {
     controller.addEventListener('selectstart', () => {
       const intersections = getIntersections();
       if (intersections.length > 0) {
-        setSelectedModel(intersections[0].object);
-        controller.userData.dragging = true;
+        setSelectedModel(intersections[0].object); // Select the model if intersection occurs
       } else if (furnitureModel) {
         const modelClone = furnitureModel.clone();
         modelClone.position.set(0, 0, -1).applyMatrix4(controller.matrixWorld);
-        scene.add(modelClone);
+        scene.add(modelClone); // Clone and add new model if no intersection
       }
     });
 
     controller.addEventListener('selectend', () => {
-      controller.userData.dragging = false;
-      setSelectedModel(null);
+      setSelectedModel(null); // Deselect the model when the user stops interacting
     });
   }, [furnitureModel]);
 
   const changeColor = () => {
     if (selectedModel) {
-      const randomColor = Math.floor(Math.random() * 16777215).toString(16);
+      const randomColor = Math.floor(Math.random() * 16777215).toString(16); // Random color generation
       selectedModel.traverse((child) => {
         if (child.isMesh) {
           child.material.color.set(`#${randomColor}`);
@@ -105,7 +126,7 @@ const ARFurnitureApp = () => {
   const deleteModel = () => {
     const scene = sceneRef.current;
     if (selectedModel) {
-      scene.remove(selectedModel);
+      scene.remove(selectedModel); // Remove the selected model
       setSelectedModel(null);
     }
   };
@@ -113,13 +134,24 @@ const ARFurnitureApp = () => {
   useEffect(() => {
     initializeScene();
     onControllerEvents();
+
+    // Add event listeners for touch gestures
+    window.addEventListener('touchstart', onTouchStart);
+    window.addEventListener('touchmove', onTouchMove);
+    window.addEventListener('touchend', onTouchEnd);
+
     return () => {
+      // Cleanup event listeners
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+
       if (rendererRef.current) {
         rendererRef.current.dispose();
         document.body.removeChild(rendererRef.current.domElement);
       }
     };
-  }, [initializeScene, onControllerEvents]);
+  }, [initializeScene, onControllerEvents, onTouchStart, onTouchMove, onTouchEnd]);
 
   return (
     <div>
