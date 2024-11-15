@@ -1,24 +1,30 @@
-import logo from './logo.svg';
-import './App.css';
+// App.js
+import React, { useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
+import "./App.css";
+import ARView from "./ARView";
 
 function App() {
+  const model = {
+    name: "Single Model",
+    glb: "/models/armchair.glb"
+  };
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Router>
+      <div className="app">
+        <h1>AR Furniture Placement</h1>
+        <div className="model-info">
+          <h2>{model.name}</h2>
+          <Link to="/ar">
+            <button>View in AR</button>
+          </Link>
+        </div>
+        <Routes>
+          <Route path="/ar" element={<ARView model={model} />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 
