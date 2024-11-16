@@ -1,120 +1,155 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import * as THREE from 'three';
-import { ARButton } from 'three/examples/jsm/webxr/ARButton';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import "./App.css";
+import * as THREE from "three";
+import { ARButton } from "three/examples/jsm/webxr/ARButton";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { XREstimatedLight } from "three/examples/jsm/webxr/XREstimatedLight";
 
-const ARModelPlacement = () => {
-  const rendererRef = useRef(null);
-  const sceneRef = useRef(null);
-  const controllerRef = useRef(null);
-  const reticleRef = useRef(null);
-  const [furnitureModel, setFurnitureModel] = useState(null);
+function App() {
+  let reticle;
+  let hitTestSource = null;
+  let hitTestSourceRequested = false;
 
-  const updateReticle = useCallback(() => {
-    const controller = controllerRef.current;
-    const reticle = reticleRef.current;
-    const scene = sceneRef.current;
+  let scene, camera, renderer;
 
-    if (!controller || !reticle || !scene) return;
+  // Single model path
+  const modelPath = "./dylan_armchair_yolk_yellow.glb";
+  const modelScaleFactor = 0.01; // Fixed scale for the single model
+  let model;
 
-    const raycaster = new THREE.Raycaster();
-    const tempMatrix = new THREE.Matrix4();
-    tempMatrix.identity().extractRotation(controller.matrixWorld);
+  let controller;
 
-    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+  init();
+  animate();
 
-    // Detect surfaces
-    const intersects = raycaster.intersectObjects(scene.children, true);
-    if (intersects.length > 0) {
-      reticle.position.copy(intersects[0].point);
-      reticle.visible = true;
-    } else {
-      reticle.visible = false;
-    }
-  }, []);
-
-  const onControllerSelect = useCallback(() => {
-    const scene = sceneRef.current;
-    const reticle = reticleRef.current;
-
-    if (reticle.visible && furnitureModel) {
-      const modelClone = furnitureModel.clone();
-      modelClone.position.copy(reticle.position);
-      scene.add(modelClone); // Place the model at the reticle position
-    }
-  }, [furnitureModel]);
-
-  const initializeScene = useCallback(() => {
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.xr.enabled = true;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    document.body.appendChild(ARButton.createButton(renderer));
-
-    // Load the furniture model
-    const loader = new GLTFLoader();
-    loader.load('/models/armchair.glb', (gltf) => {
-      const model = gltf.scene;
-      model.scale.set(0.1, 0.1, 0.1); // Scale the model
-      setFurnitureModel(model);
-    });
-
-    // Create the reticle
-    const reticle = new THREE.Mesh(
-      new THREE.RingGeometry(0.1, 0.15, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+  function init() {
+    let myCanvas = document.getElementById("canvas");
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(
+      70,
+      myCanvas.innerWidth / myCanvas.innerHeight,
+      0.01,
+      20
     );
-    reticle.rotation.x = -Math.PI / 2; // Align with the floor
-    reticle.visible = false; // Initially hidden
-    scene.add(reticle);
-    reticleRef.current = reticle;
 
-    // AR controller setup
-    const controller = renderer.xr.getController(0);
+    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+    light.position.set(0.5, 1, 0.25);
+    scene.add(light);
+
+    renderer = new THREE.WebGLRenderer({
+      canvas: myCanvas,
+      antialias: true,
+      alpha: true,
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(myCanvas.innerWidth, myCanvas.innerHeight);
+    renderer.xr.enabled = true;
+
+    const xrLight = new XREstimatedLight(renderer);
+    xrLight.addEventListener("estimationstart", () => {
+      scene.add(xrLight);
+      scene.remove(light);
+      if (xrLight.environment) {
+        scene.environment = xrLight.environment;
+      }
+    });
+
+    xrLight.addEventListener("estimationend", () => {
+      scene.add(light);
+      scene.remove(xrLight);
+      scene.environment = null; // Reset environment
+    });
+
+    let arButton = ARButton.createButton(renderer, {
+      requiredFeatures: ["hit-test"],
+      optionalFeatures: ["dom-overlay", "light-estimation"],
+      domOverlay: { root: document.body },
+    });
+    arButton.style.bottom = "20%";
+    document.body.appendChild(arButton);
+
+    // Load the single model
+    const loader = new GLTFLoader();
+    loader.load(modelPath, function (glb) {
+      model = glb.scene;
+      model.scale.set(modelScaleFactor, modelScaleFactor, modelScaleFactor);
+      model.visible = false; // Initially not visible
+    }, undefined, function (error) {
+      console.error(`Error loading model ${modelPath}:`, error);
+    });
+
+    controller = renderer.xr.getController(0);
+    controller.addEventListener("select", onSelect);
     scene.add(controller);
-    controllerRef.current = controller;
 
-    // Handle window resize
-    window.addEventListener('resize', () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      renderer.setSize(width, height);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-    });
+    reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial()
+    );
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+  }
 
-    renderer.setAnimationLoop(() => {
-      updateReticle(); // Ensure reticle updates in the render loop
-      renderer.render(scene, camera);
-    });
-  }, [updateReticle]);
+  function onSelect() {
+    if (reticle.visible && model) {
+      const newModel = model.clone();
+      newModel.visible = true;
 
-  useEffect(() => {
-    initializeScene();
+      // Set position and rotation
+      reticle.matrix.decompose(
+        newModel.position,
+        newModel.quaternion,
+        newModel.scale
+      );
 
-    // Add event listener for controller interaction
-    const controller = controllerRef.current;
-    if (controller) {
-      controller.addEventListener('selectstart', onControllerSelect);
+      scene.add(newModel);
+    }
+  }
+
+  function animate() {
+    renderer.setAnimationLoop(render);
+  }
+
+  function render(timestamp, frame) {
+    if (frame) {
+      const referenceSpace = renderer.xr.getReferenceSpace();
+      const session = renderer.xr.getSession();
+
+      if (hitTestSourceRequested===false) {
+        session.requestReferenceSpace("viewer").then(function (referenceSpace) {
+          session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+            hitTestSource = source;
+          });
+        });
+
+        session.addEventListener("end", function () {
+          hitTestSourceRequested = false;
+          hitTestSource = null;
+        });
+
+        hitTestSourceRequested = true;
+      }
+
+      if (hitTestSource) {
+        const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+        if (hitTestResults.length) {
+          const hit = hitTestResults[0];
+
+          reticle.visible = true;
+          reticle.matrix.fromArray(
+            hit.getPose(referenceSpace).transform.matrix
+          );
+        } else {
+          reticle.visible = false;
+        }
+      }
     }
 
-    return () => {
-      if (rendererRef.current) {
-        rendererRef.current.dispose();
-        document.body.removeChild(rendererRef.current.domElement);
-      }
-    };
-  }, [initializeScene, onControllerSelect]);
+    renderer.render(scene, camera);
+  }
 
-  return null; // No UI elements needed for this minimal example
-};
+  return <div className="App"></div>;
+}
 
-export default ARModelPlacement;
+export default App;
