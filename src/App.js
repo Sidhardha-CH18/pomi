@@ -12,7 +12,7 @@ function App() {
   let scene, camera, renderer;
 
   // Single model path
-  const modelPath = "./dylan_armchair_yolk_yellow.glb";
+  const modelPath = "./models/armchair.glb";
   const modelScaleFactor = 0.01; // Fixed scale for the single model
   let model;
 
